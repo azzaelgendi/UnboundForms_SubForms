@@ -1,0 +1,396 @@
+'***********************************************************************
+'Revision History
+'Azza Elgendy
+'**********************************************************************
+Option Compare Database
+Option Explicit
+'----------------------------------------------------------------------
+'
+'Global Variable Decleration
+'
+'----------------------------------------------------------------------
+Dim rsCustomer As New ADODB.Recordset
+Dim rsListName As New ADODB.Recordset
+Dim rsOrder As New ADODB.Recordset
+Dim subFormDetails As New ADODB.Recordset
+Dim rsSubForm As New ADODB.Recordset
+Dim connection As New ADODB.connection
+Dim saveOrderNo As Integer
+Dim savedLineNumber As Integer
+Dim editOrAdd As String
+Dim newOrEdit As String
+'----------------------------------------------------------------------
+'
+'Check for errors
+'
+'----------------------------------------------------------------------
+Private Function Edit() As String
+    Dim errors As String
+        If IsNull(Me.txtPrice.Value) Or Me.txtPrice.Value < 0 Then
+            Me.txtPrice.SetFocus
+            errors = errors & "The price must be not null and not less than Zero" & vbNewLine
+        End If
+        If IsNull(Me.txtQuantity.Value) Or Me.txtQuantity.Value < 1 Then
+            If errors <> " " Then
+                 Me.txtPrice.SetFocus
+            End If
+            errors = errors & "The Quantity must be not null and more than Zero" & vbNewLine
+        End If
+   Edit = errors
+End Function
+'----------------------------------------------------------------------
+'
+'Modify Part Mode ,lock controls
+'
+'----------------------------------------------------------------------
+Private Sub modifyPartMode(yes As Boolean)
+        
+        Me.listSelectCustomer.Enabled = Not yes
+        Me.listSub.Enabled = Not yes
+        Me.btnNewOrder.Enabled = Not yes
+        Me.btnEditOrder.Enabled = Not yes
+        Me.btnExit.Enabled = Not yes
+        Me.customerNumber.Enabled = Not yes
+        Me.address1.Enabled = Not yes
+        Me.postalCode.Enabled = Not yes
+        Me.provinceCode.Enabled = Not yes
+        Me.city.Enabled = Not yes
+        
+        Me.txtPrice.SetFocus
+        Me.btnCancel.Visible = yes
+        Me.btnSave.Visible = yes
+        Me.btnAddItem.Visible = yes
+        Me.btnEditItem.Visible = yes
+        Me.btnDeleteItem.Visible = yes
+        Me.btnDoneOrder.Visible = yes
+        
+        'if new order add only allowed
+        If newOrEdit = "N" Then
+            Me.btnCancel.Enabled = Not yes
+            Me.btnSave.Enabled = Not yes
+            Me.btnAddItem.Enabled = yes
+            Me.btnEditItem.Enabled = Not yes
+            Me.btnDeleteItem.Enabled = Not yes
+            Me.btnDoneOrder.Enabled = yes
+        ElseIf newOrEdit = "E" Then
+            Me.btnCancel.Enabled = Not yes
+            Me.btnSave.Enabled = Not yes
+            Me.btnAddItem.Enabled = yes
+            Me.btnEditItem.Enabled = yes
+            Me.btnDeleteItem.Enabled = yes
+            Me.btnDoneOrder.Enabled = yes
+        End If
+End Sub
+
+'----------------------------------------------------------------------
+'
+'Edit or Add ,lock controls
+'
+'----------------------------------------------------------------------
+Private Sub editAddMode(yes As Boolean)
+        Me.DetailQuerySubForm.Form.Visible = Not yes
+        Me.btnCancel.Enabled = yes
+        Me.btnSave.Enabled = yes
+        Me.btnAddItem.Enabled = Not yes
+        Me.btnEditItem.Enabled = Not yes
+        Me.btnDeleteItem.Enabled = Not yes
+        Me.btnDoneOrder.Enabled = Not yes
+End Sub
+
+'----------------------------------------------------------------------
+'
+'Add new Item "Part" To the order
+'
+'----------------------------------------------------------------------
+Private Sub btnAddItem_Click()
+    editOrAdd = "A"
+    editAddMode True
+    saveOrderNo = Me.listSub.Column(0)
+    'preloading input fields
+    Me.txtQuantity = 0
+    Me.txtPrice = 0
+End Sub
+'----------------------------------------------------------------------
+'
+'Revert all changes
+'
+'----------------------------------------------------------------------
+Private Sub btnCancel_Click()
+    'rsSubForm.CancelUpdate
+    editAddMode False
+End Sub
+
+'----------------------------------------------------------------------
+'
+'Delete item from the order
+'
+'----------------------------------------------------------------------
+Private Sub btnDeleteItem_Click()
+    savedLineNumber = Me.DetailQuerySubForm.Form!lineNo
+    If savedLineNumber > 0 Then
+        rsSubForm.MoveFirst
+        rsSubForm.Find "lineNo =" & savedLineNumber
+        rsSubForm.Delete
+        emptySubForm
+        modifyPartMode True
+    Else
+        MsgBox "Please select item to delete"
+    End If
+End Sub
+'----------------------------------------------------------------------
+'
+'when finish the order
+'
+'----------------------------------------------------------------------
+Private Sub btnDoneOrder_Click()
+    'editAddMode False
+    modifyPartMode False
+    emptySubForm
+End Sub
+
+'----------------------------------------------------------------------
+'
+'Edit Item on the order
+'
+'----------------------------------------------------------------------
+Private Sub btnEditItem_Click()
+    saveOrderNo = Me.listSub.Column(0)
+    'If Me.DetailQuerySubForm.CurrentRecord > 0 Then
+    If Not Me.DetailQuerySubForm.Form.CurrentRecord > 0 Then
+        MsgBox ("Please select an item to edit")
+    Else
+        editOrAdd = "E"
+        editAddMode True
+        
+        'searching for a record in the orderDetail table with the same lineNo
+        rsSubForm.MoveFirst
+        rsSubForm.Find "lineNo = " & Me.DetailQuerySubForm.Form!lineNo
+        
+        ' preloading input values from the current record
+        Me.ComboPart.Value = rsSubForm!partId
+        Me.txtQuantity.Value = rsSubForm!quantity
+        Me.txtPrice.Value = Me.ComboPart.Column(2)
+    End If
+   
+End Sub
+'----------------------------------------------------------------------
+'
+'check if open order selected and excutes the modifymode
+'
+'----------------------------------------------------------------------
+Private Sub btnEditOrder_Click()
+    newOrEdit = "E"
+    If listSub.Value <> -1 Then
+        modifyPartMode True
+    Else
+        MsgBox "Please Select Order to Edit"
+    End If
+End Sub
+'----------------------------------------------------------------------
+'
+'Exit The form
+'
+'----------------------------------------------------------------------
+Private Sub btnExit_Click()
+    DoCmd.Close
+End Sub
+'----------------------------------------------------------------------
+'
+'Add new order for the selected customer
+'
+'----------------------------------------------------------------------
+Private Sub btnNewOrder_Click()
+    newOrEdit = "N"
+    rsOrder.AddNew
+        rsOrder!OrderDate = Date
+        rsOrder!Printed = False
+        rsOrder!custNo = Me.customerNumber
+        rsOrder.Update
+        Me.listSub.Requery
+        saveOrderNo = rsOrder!orderNo
+        Me.listSub = saveOrderNo
+        modifyPartMode True
+End Sub
+'----------------------------------------------------------------------
+'
+'Save Updates if no errors
+'Save based on addOrEdit Variable "A" or "E"
+'
+'----------------------------------------------------------------------
+Private Sub btnSave_Click()
+     Dim errors As String
+    errors = Edit
+    If errors = "" Then
+    
+    ' if we're editing a record, we just search for it in the orderDetail data table
+        If editOrAdd = "E" Then
+            rsSubForm.MoveFirst
+            rsSubForm.Find "lineNo =" & Me.DetailQuerySubForm.Form!lineNo
+        
+        ' if not, we add a new record, set the order number (the line number is generated automatically)
+        ElseIf editOrAdd = "A" Then
+            rsSubForm.AddNew
+            rsSubForm!orderNo = saveOrderNo
+        End If
+        
+        'then we load the values from our inputs
+        rsSubForm!partId = Me.ComboPart.Column(0)
+        rsSubForm!quantity = Me.txtQuantity.Value
+        rsSubForm!price = Me.txtPrice.Value
+        
+        'save them in the database and update the subform
+        rsSubForm.Update
+        emptySubForm
+        editAddMode False
+    Else
+        MsgBox "Please Correct The errors: " & errors & vbNewLine & vbCrLf
+    End If
+End Sub
+
+'----------------------------------------------------------------------
+'
+'Select part from the combobox and load the price
+'
+'----------------------------------------------------------------------
+Private Sub ComboPart_Change()
+     Me.txtPrice.Value = Me.ComboPart.Column(2)
+End Sub
+'----------------------------------------------------------------------
+'
+'set the connection and load fields on form load
+'
+'----------------------------------------------------------------------
+Private Sub Form_Load()
+    Set connection = CurrentProject.connection
+    loadRecords
+    loadFields
+    LoadlistCustomer
+    emptySubForm
+    loadComboParts
+    Me.listSelectCustomer.Selected(0) = True
+    modifyPartMode False
+    'lock and remove navigation from the subForm
+    Me.DetailQuerySubForm.Locked = True
+    Me.DetailQuerySubForm.Form.NavigationButtons = False
+    Me.DetailQuerySubForm.Form.RecordSelectors = False
+End Sub
+'----------------------------------------------------------------------
+'
+'select the customer and load the open order list
+'
+'----------------------------------------------------------------------
+Private Sub listSelectCustomer_Click()
+    listSub.Value = -1
+    emptySubForm
+   If Me.listSelectCustomer.ListCount > 0 Then
+        rsCustomer.MoveFirst
+        rsCustomer.Move (listSelectCustomer.ListIndex)
+        loadFields
+        Me.listSelectCustomer.Selected(rsCustomer.AbsolutePosition - 1) = True
+        Me.listSelectCustomer = Me.listSelectCustomer.ItemData(rsCustomer.AbsolutePosition - 1)
+        If Not IsNull(rsOrder.Fields("orderNo")) Then
+            loadOpenOrders
+        Else
+            MsgBox ("there is no orders for this record")
+        End If
+    End If
+End Sub
+'----------------------------------------------------------------------
+'
+'Load fields from the record set
+'
+'----------------------------------------------------------------------
+Private Sub loadFields()
+    Me.customerNumber = rsCustomer.Fields("customerNumber")
+    Me.address1 = rsCustomer.Fields("address1")
+    Me.city = rsCustomer.Fields("city")
+    Me.postalCode = rsCustomer.Fields("postalCode")
+    Me.provinceCode = rsCustomer.Fields("provinceCode")
+    Me.listSelectCustomer = rsCustomer.Fields("customerNumber")
+End Sub
+'----------------------------------------------------------------------
+'
+'close the recordSets if opened and open the record sets
+'
+'----------------------------------------------------------------------
+Private Sub loadRecords()
+    If rsOrder.State = 1 Then
+        rsOrder.Close
+    End If
+    If rsCustomer.State = 1 Then
+        rsCustomer.Close
+    End If
+    If rsSubForm.State = 1 Then
+        rsSubForm.Close
+    End If
+    If subFormDetails.State = 1 Then
+        subFormDetails.Close
+    End If
+    rsCustomer.Open "SELECT * FROM customer ORDER BY lastName", connection, adOpenKeyset, adLockOptimistic, adCmdText
+    rsOrder.Open "SELECT * FROM orderQuery ORDER BY orderNo", connection, adOpenKeyset, adLockOptimistic, adCmdText
+    rsSubForm.Open "SELECT *FROM DetailQuery ORDER BY Description ", connection, adOpenKeyset, adLockOptimistic, adCmdText
+    subFormDetails.Open "SELECT * FROM orderDetail WHERE orderNo=" & saveOrderNo, connection, adOpenKeyset, adLockOptimistic, adCmdText
+End Sub
+'----------------------------------------------------------------------
+'
+'load Customer List
+'
+'----------------------------------------------------------------------
+Private Sub LoadlistCustomer()
+    Me.listSelectCustomer.RowSource = "SELECT lastName+', '+firstName ,customerNumber AS fullName FROM customer ORDER BY lastName"
+    Me.listSelectCustomer.ColumnCount = 1
+    Me.listSelectCustomer.BoundColumn = 2
+End Sub
+'----------------------------------------------------------------------
+'
+'load openOrders List
+'
+'----------------------------------------------------------------------
+Private Sub loadOpenOrders()
+    Me.listSub.RowSource = "SELECT * FROM orderQuery WHERE custNo = " & Me.customerNumber
+    Me.listSub.ColumnCount = 4
+    Me.listSub.BoundColumn = 1
+End Sub
+'----------------------------------------------------------------------
+'
+'load parts comboBox
+'
+'----------------------------------------------------------------------
+Private Sub loadComboParts()
+    Me.ComboPart.RowSource = "SELECT PartID,Description,ListPrice FROM Parts ORDER BY Description"
+    Me.ComboPart.ColumnCount = 3
+    Me.ComboPart.BoundColumn = 1
+    Me.txtPrice.Value = 0
+    Me.txtQuantity.Value = 0
+End Sub
+'----------------------------------------------------------------------
+'
+'Refresh and requery the subform
+'
+'----------------------------------------------------------------------
+Private Sub emptySubForm()
+    Me.DetailQuerySubForm.Form.Requery
+End Sub
+
+'----------------------------------------------------------------------
+'
+'load the subform records
+'
+'----------------------------------------------------------------------
+Private Sub loadSubForm()
+If subFormDetails.RecordCount > 0 Then
+  Set Me.DetailQuerySubForm.Form.Recordset = subFormDetails
+    Me.Requery
+    Me.Refresh
+End If
+End Sub
+'----------------------------------------------------------------------
+'
+'load the subform on click of the list
+'
+'----------------------------------------------------------------------
+Private Sub listSub_Click()
+    saveOrderNo = Me.listSub.Column(0)
+    loadSubForm
+End Sub
+
